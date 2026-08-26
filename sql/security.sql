@@ -5,6 +5,17 @@ CREATE ROLE IF NOT EXISTS 'ruolo_accesso';
 CREATE ROLE IF NOT EXISTS 'ruolo_utente';
 CREATE ROLE IF NOT EXISTS 'ruolo_gestore';
 
+-- Account tecnici utilizzati dal thin client.
+-- Le password devono essere sostituite durante la configurazione.
+CREATE USER IF NOT EXISTS 'account_accesso'@'localhost'
+    IDENTIFIED BY 'Accesso_DB_2026!';
+
+CREATE USER IF NOT EXISTS 'account_utente'@'localhost'
+    IDENTIFIED BY 'Utente_DB_2026!';
+
+CREATE USER IF NOT EXISTS 'account_gestore'@'localhost'
+    IDENTIFIED BY 'Gestore_DB_2026!';
+
 -- Associazione degli account tecnici ai rispettivi ruoli.
 -- Gli account e le relative password sono configurati separatamente.
 GRANT 'ruolo_accesso'
