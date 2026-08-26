@@ -166,9 +166,7 @@ public final class BachecaView {
         System.out.print("Operazione: ");
         switch (scanner.nextLine().trim()) {
             case "1" -> comunicazioneView.inserisciCommento(annuncio);
-            case "2" -> {
-                comunicazioneView.inviaMessaggio(annuncio);
-            }
+            case "2" -> comunicazioneView.inviaMessaggio(annuncio);
             case "3" -> {
                 if (giaSeguito) {
                     controller.smettiDiSeguire(annuncio);
