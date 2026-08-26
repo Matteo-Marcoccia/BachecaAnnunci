@@ -18,6 +18,8 @@ CREATE PROCEDURE sp_RegistraUtente (
     IN p_TelefonoFisso VARCHAR(20),
     IN p_RecapitoPreferito VARCHAR(15)
 )
+MODIFIES SQL DATA
+-- La procedura accede alle tabelle con i privilegi de creatore
 SQL SECURITY DEFINER
 BEGIN
     INSERT INTO Utente (
@@ -55,6 +57,7 @@ END $$
 -- Procedura di supporto: elenco delle categorie selezionabili.
 DROP PROCEDURE IF EXISTS sp_ElencoCategorie $$
 CREATE PROCEDURE sp_ElencoCategorie ()
+READS SQL DATA
 SQL SECURITY DEFINER
 BEGIN
     SELECT
@@ -75,6 +78,7 @@ CREATE PROCEDURE sp_PubblicaAnnuncio (
     IN p_Autore VARCHAR(30),
     IN p_Categoria INT UNSIGNED
 )
+MODIFIES SQL DATA
 SQL SECURITY DEFINER
 BEGIN
     INSERT INTO Annuncio (
@@ -95,6 +99,24 @@ BEGIN
     );
 END $$
 
+-- Procedura interna condivisa da OP3, OP9 e OP10 (Notifica).
+DROP PROCEDURE IF EXISTS sp_ElencoDestinatariNotificaAnnuncio $$
+CREATE PROCEDURE sp_ElencoDestinatariNotificaAnnuncio (
+    IN p_CodiceAnnuncio INT UNSIGNED
+)
+READS SQL DATA
+SQL SECURITY DEFINER
+BEGIN
+    SELECT
+        r.Username,
+        r.RecapitoPreferito,
+        r.Recapito
+    FROM Segui AS s
+    JOIN v_RecapitiPreferiti AS r
+      ON r.Username = s.UsernameUtente
+    WHERE s.CodiceAnnuncio = p_CodiceAnnuncio;
+END $$
+
 -- OP3: pubblicazione di una nota e recupero dei follower da notificare.
 DROP PROCEDURE IF EXISTS sp_PubblicaNota $$
 CREATE PROCEDURE sp_PubblicaNota (
@@ -102,9 +124,10 @@ CREATE PROCEDURE sp_PubblicaNota (
     IN p_CodiceAnnuncio INT UNSIGNED,
     IN p_TestoNota TEXT
 )
+MODIFIES SQL DATA
 SQL SECURITY DEFINER
 BEGIN
-    DECLARE v_CodiceAnnuncio INT UNSIGNED DEFAULT NULL;
+    DECLARE var_CodiceAnnuncio INT UNSIGNED DEFAULT NULL;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
@@ -116,14 +139,14 @@ BEGIN
     START TRANSACTION;
 
     SELECT Codice
-    INTO v_CodiceAnnuncio
+    INTO var_CodiceAnnuncio
     FROM Annuncio
     WHERE Codice = p_CodiceAnnuncio
       AND Autore = p_UsernameAutore
       AND Stato = 'InVendita'
     FOR UPDATE;
 
-    IF v_CodiceAnnuncio IS NULL THEN
+    IF var_CodiceAnnuncio IS NULL THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'RV11: solo l autore puo integrare un proprio annuncio in vendita';
     END IF;
@@ -136,19 +159,12 @@ BEGIN
     VALUES (
         p_TestoNota,
         CURRENT_TIMESTAMP,
-        v_CodiceAnnuncio
+        var_CodiceAnnuncio
     );
 
     COMMIT;
 
-    SELECT
-        r.Username,
-        r.RecapitoPreferito,
-        r.Recapito
-    FROM Segui AS s
-    JOIN v_RecapitiPreferiti AS r
-      ON r.Username = s.UsernameUtente
-    WHERE s.CodiceAnnuncio = p_CodiceAnnuncio;
+    CALL sp_ElencoDestinatariNotificaAnnuncio(p_CodiceAnnuncio);
 END $$
 
 -- OP4: recupero degli annunci di una categoria e delle sue sottocategorie.
@@ -157,6 +173,7 @@ CREATE PROCEDURE sp_RicercaAnnunciPerCategoria (
     IN p_CodiceCategoria INT UNSIGNED,
     IN p_UsernameRichiedente VARCHAR(30)
 )
+READS SQL DATA
 SQL SECURITY DEFINER
 BEGIN
     WITH RECURSIVE SottoCategorie AS (
@@ -194,6 +211,7 @@ DROP PROCEDURE IF EXISTS sp_DettaglioAnnuncio $$
 CREATE PROCEDURE sp_DettaglioAnnuncio (
     IN p_CodiceAnnuncio INT UNSIGNED
 )
+READS SQL DATA
 SQL SECURITY DEFINER
 BEGIN
     SELECT *
@@ -206,6 +224,7 @@ DROP PROCEDURE IF EXISTS sp_ElencoNoteAnnuncio $$
 CREATE PROCEDURE sp_ElencoNoteAnnuncio (
     IN p_CodiceAnnuncio INT UNSIGNED
 )
+READS SQL DATA
 SQL SECURITY DEFINER
 BEGIN
     SELECT
@@ -222,6 +241,7 @@ DROP PROCEDURE IF EXISTS sp_ElencoCommentiAnnuncio $$
 CREATE PROCEDURE sp_ElencoCommentiAnnuncio (
     IN p_CodiceAnnuncio INT UNSIGNED
 )
+READS SQL DATA
 SQL SECURITY DEFINER
 BEGIN
     SELECT
@@ -241,6 +261,7 @@ CREATE PROCEDURE sp_InserisciCommento (
     IN p_CodiceAnnuncio INT UNSIGNED,
     IN p_Autore VARCHAR(30)
 )
+MODIFIES SQL DATA
 SQL SECURITY DEFINER
 BEGIN
     INSERT INTO Commento_Pubblico (
@@ -267,7 +288,7 @@ BEGIN
         WHERE s.CodiceAnnuncio = p_CodiceAnnuncio
           AND s.UsernameUtente <> p_Autore
 
-        UNION
+        UNION ALL
 
         SELECT a.Autore AS Username
         FROM Annuncio AS a
@@ -285,6 +306,7 @@ CREATE PROCEDURE sp_InviaMessaggioPrivato (
     IN p_Mittente VARCHAR(30),
     IN p_Destinatario VARCHAR(30)
 )
+MODIFIES SQL DATA
 SQL SECURITY DEFINER
 BEGIN
     INSERT INTO Messaggio_Privato (
@@ -315,6 +337,7 @@ DROP PROCEDURE IF EXISTS sp_ElencoAnnunciSeguiti $$
 CREATE PROCEDURE sp_ElencoAnnunciSeguiti (
     IN p_Username VARCHAR(30)
 )
+READS SQL DATA
 SQL SECURITY DEFINER
 BEGIN
     SELECT
@@ -339,9 +362,10 @@ CREATE PROCEDURE sp_SeguiAnnuncio (
     IN p_Username VARCHAR(30),
     IN p_CodiceAnnuncio INT UNSIGNED
 )
+MODIFIES SQL DATA
 SQL SECURITY DEFINER
 BEGIN
-    DECLARE v_CodiceAnnuncio INT UNSIGNED DEFAULT NULL;
+    DECLARE var_CodiceAnnuncio INT UNSIGNED DEFAULT NULL;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
@@ -353,13 +377,13 @@ BEGIN
     START TRANSACTION;
 
     SELECT Codice
-    INTO v_CodiceAnnuncio
+    INTO var_CodiceAnnuncio
     FROM Annuncio
     WHERE Codice = p_CodiceAnnuncio
       AND Stato = 'InVendita'
     FOR UPDATE;
 
-    IF v_CodiceAnnuncio IS NULL THEN
+    IF var_CodiceAnnuncio IS NULL THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'RV13: si possono seguire solo annunci in vendita';
     END IF;
@@ -370,7 +394,7 @@ BEGIN
     )
     VALUES (
         p_Username,
-        v_CodiceAnnuncio
+        var_CodiceAnnuncio
     );
 
     COMMIT;
@@ -382,6 +406,7 @@ CREATE PROCEDURE sp_SmettiDiSeguireAnnuncio (
     IN p_Username VARCHAR(30),
     IN p_CodiceAnnuncio INT UNSIGNED
 )
+MODIFIES SQL DATA
 SQL SECURITY DEFINER
 BEGIN
     DELETE FROM Segui
@@ -399,9 +424,10 @@ CREATE PROCEDURE sp_ModificaAnnuncio (
     IN p_Prezzo DECIMAL(10, 2),
     IN p_Categoria INT UNSIGNED
 )
+MODIFIES SQL DATA
 SQL SECURITY DEFINER
 BEGIN
-    DECLARE v_CodiceAnnuncio INT UNSIGNED DEFAULT NULL;
+    DECLARE var_CodiceAnnuncio INT UNSIGNED DEFAULT NULL;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
@@ -413,14 +439,14 @@ BEGIN
     START TRANSACTION;
 
     SELECT Codice
-    INTO v_CodiceAnnuncio
+    INTO var_CodiceAnnuncio
     FROM Annuncio
     WHERE Codice = p_CodiceAnnuncio
       AND Autore = p_UsernameAutore
       AND Stato = 'InVendita'
     FOR UPDATE;
 
-    IF v_CodiceAnnuncio IS NULL THEN
+    IF var_CodiceAnnuncio IS NULL THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'RV11: solo l autore puo modificare un proprio annuncio in vendita';
     END IF;
@@ -430,18 +456,11 @@ BEGIN
         DescrizioneArticolo = p_DescrizioneArticolo,
         Prezzo = p_Prezzo,
         Categoria = p_Categoria
-    WHERE Codice = v_CodiceAnnuncio;
+    WHERE Codice = var_CodiceAnnuncio;
 
     COMMIT;
 
-    SELECT
-        r.Username,
-        r.RecapitoPreferito,
-        r.Recapito
-    FROM Segui AS s
-    JOIN v_RecapitiPreferiti AS r
-      ON r.Username = s.UsernameUtente
-    WHERE s.CodiceAnnuncio = p_CodiceAnnuncio;
+    CALL sp_ElencoDestinatariNotificaAnnuncio(p_CodiceAnnuncio);
 END $$
 
 -- OP10: aggiornamento di un proprio annuncio allo stato Venduto.
@@ -450,9 +469,10 @@ CREATE PROCEDURE sp_ContrassegnaAnnuncioVenduto (
     IN p_UsernameAutore VARCHAR(30),
     IN p_CodiceAnnuncio INT UNSIGNED
 )
+MODIFIES SQL DATA
 SQL SECURITY DEFINER
 BEGIN
-    DECLARE v_CodiceAnnuncio INT UNSIGNED DEFAULT NULL;
+    DECLARE var_CodiceAnnuncio INT UNSIGNED DEFAULT NULL;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
@@ -464,32 +484,25 @@ BEGIN
     START TRANSACTION;
 
     SELECT Codice
-    INTO v_CodiceAnnuncio
+    INTO var_CodiceAnnuncio
     FROM Annuncio
     WHERE Codice = p_CodiceAnnuncio
       AND Autore = p_UsernameAutore
       AND Stato = 'InVendita'
     FOR UPDATE;
 
-    IF v_CodiceAnnuncio IS NULL THEN
+    IF var_CodiceAnnuncio IS NULL THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'RV11: solo l autore puo vendere un proprio annuncio in vendita';
     END IF;
 
     UPDATE Annuncio
     SET Stato = 'Venduto'
-    WHERE Codice = v_CodiceAnnuncio;
+    WHERE Codice = var_CodiceAnnuncio;
 
     COMMIT;
 
-    SELECT
-        r.Username,
-        r.RecapitoPreferito,
-        r.Recapito
-    FROM Segui AS s
-    JOIN v_RecapitiPreferiti AS r
-      ON r.Username = s.UsernameUtente
-    WHERE s.CodiceAnnuncio = p_CodiceAnnuncio;
+    CALL sp_ElencoDestinatariNotificaAnnuncio(p_CodiceAnnuncio);
 END $$
 
 -- OP11: creazione e collocazione di una categoria.
@@ -499,6 +512,7 @@ CREATE PROCEDURE sp_CreaCategoria (
     IN p_CategoriaPadre INT UNSIGNED,
     IN p_GestoreCreatore VARCHAR(30)
 )
+MODIFIES SQL DATA
 SQL SECURITY DEFINER
 BEGIN
     INSERT INTO Categoria (
@@ -518,8 +532,18 @@ DROP PROCEDURE IF EXISTS sp_GeneraReportUtenti $$
 CREATE PROCEDURE sp_GeneraReportUtenti (
     IN p_UsernameGestore VARCHAR(30)
 )
+READS SQL DATA
 SQL SECURITY DEFINER
 BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+
+    SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+    START TRANSACTION READ ONLY;
+
     IF NOT EXISTS (
         SELECT 1
         FROM Utente
@@ -537,6 +561,8 @@ BEGIN
         PercentualeVenduti
     FROM v_StatisticheUtenti
     ORDER BY Username;
+
+    COMMIT;
 END $$
 
 -- OP13: recupero dei dati necessari all'autenticazione e alla sessione.
@@ -544,6 +570,7 @@ DROP PROCEDURE IF EXISTS sp_RecuperaProfiloAccesso $$
 CREATE PROCEDURE sp_RecuperaProfiloAccesso (
     IN p_Username VARCHAR(30)
 )
+READS SQL DATA
 SQL SECURITY DEFINER
 BEGIN
     SELECT
@@ -561,6 +588,7 @@ DROP PROCEDURE IF EXISTS sp_ElencoAnnunciUtente $$
 CREATE PROCEDURE sp_ElencoAnnunciUtente (
     IN p_Username VARCHAR(30)
 )
+READS SQL DATA
 SQL SECURITY DEFINER
 BEGIN
     SELECT
@@ -581,15 +609,17 @@ DROP PROCEDURE IF EXISTS sp_ElencoConversazioniUtente $$
 CREATE PROCEDURE sp_ElencoConversazioniUtente (
     IN p_Username VARCHAR(30)
 )
+READS SQL DATA
 SQL SECURITY DEFINER
 BEGIN
     SELECT DISTINCT
         m.Annuncio AS CodiceAnnuncio,
         a.Titolo AS TitoloAnnuncio,
-        CASE
-            WHEN m.Mittente = p_Username THEN m.Destinatario
-            ELSE m.Mittente
-        END AS AltroUtente
+        IF(
+            m.Mittente = p_Username,
+            m.Destinatario,
+            m.Mittente
+        ) AS AltroUtente
     FROM Messaggio_Privato AS m
     JOIN Annuncio AS a
       ON a.Codice = m.Annuncio
@@ -605,8 +635,18 @@ CREATE PROCEDURE sp_VisualizzaConversazione (
     IN p_AltroUtente VARCHAR(30),
     IN p_CodiceAnnuncio INT UNSIGNED
 )
+READS SQL DATA
 SQL SECURITY DEFINER
 BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+
+    SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+    START TRANSACTION READ ONLY;
+
     IF p_UsernameRichiedente = p_AltroUtente THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'RV4: mittente e destinatario devono essere distinti';
@@ -636,6 +676,8 @@ BEGIN
           (Mittente = p_AltroUtente AND Destinatario = p_UsernameRichiedente)
       )
     ORDER BY DataOra, CodiceMessaggio;
+
+    COMMIT;
 END $$
 
 -- Controllo interno: coerenza tra account DBMS e profilo applicativo.
@@ -643,27 +685,28 @@ DROP PROCEDURE IF EXISTS sp_VerificaProfiloSessione $$
 CREATE PROCEDURE sp_VerificaProfiloSessione (
     IN p_Username VARCHAR(30)
 )
+READS SQL DATA
 SQL SECURITY DEFINER
 BEGIN
-    DECLARE v_IsGestore BOOLEAN DEFAULT NULL;
-    DECLARE v_AccountDBMS VARCHAR(100);
+    DECLARE var_IsGestore BOOLEAN DEFAULT NULL;
+    DECLARE var_AccountDBMS VARCHAR(100);
 
     SELECT IsGestore
-    INTO v_IsGestore
+    INTO var_IsGestore
     FROM Utente
     WHERE Username = p_Username;
 
-    IF v_IsGestore IS NULL THEN
+    IF var_IsGestore IS NULL THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Sessione non valida: utente inesistente';
     END IF;
 
-    SET v_AccountDBMS = SUBSTRING_INDEX(USER(), '@', 1);
+    SET var_AccountDBMS = SUBSTRING_INDEX(USER(), '@', 1);
 
     IF NOT (
-        (v_AccountDBMS = 'account_utente' AND v_IsGestore = FALSE)
+        (var_AccountDBMS = 'account_utente' AND var_IsGestore = FALSE)
         OR
-        (v_AccountDBMS = 'account_gestore' AND v_IsGestore = TRUE)
+        (var_AccountDBMS = 'account_gestore' AND var_IsGestore = TRUE)
     ) THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Sessione non valida: profilo e ruolo DBMS non coerenti';
@@ -671,7 +714,7 @@ BEGIN
 
     SELECT
         p_Username AS Username,
-        IF(v_IsGestore, 'Gestore', 'Utente') AS ProfiloVerificato;
+        IF(var_IsGestore, 'Gestore', 'Utente') AS ProfiloVerificato;
 END $$
 
 DELIMITER ;

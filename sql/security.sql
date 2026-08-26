@@ -98,8 +98,3 @@ TO 'ruolo_gestore';
 
 GRANT EXECUTE ON PROCEDURE BachecaAnnunci.sp_GeneraReportUtenti
 TO 'ruolo_gestore';
-
--- Controllo della configurazione ottenuta.
-SHOW GRANTS FOR 'ruolo_accesso';
-SHOW GRANTS FOR 'ruolo_utente';
-SHOW GRANTS FOR 'ruolo_gestore';
