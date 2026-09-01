@@ -16,27 +16,6 @@ CREATE USER IF NOT EXISTS 'account_utente'@'localhost'
 CREATE USER IF NOT EXISTS 'account_gestore'@'localhost'
     IDENTIFIED BY 'Gestore_DB_2026!';
 
--- Associazione degli account tecnici ai rispettivi ruoli.
--- Gli account e le relative password sono configurati separatamente.
-GRANT 'ruolo_accesso'
-TO 'account_accesso'@'localhost';
-
-GRANT 'ruolo_utente'
-TO 'account_utente'@'localhost';
-
-GRANT 'ruolo_gestore'
-TO 'account_gestore'@'localhost';
-
--- Attivazione automatica del ruolo all'apertura della connessione.
-SET DEFAULT ROLE 'ruolo_accesso'
-TO 'account_accesso'@'localhost';
-
-SET DEFAULT ROLE 'ruolo_utente'
-TO 'account_utente'@'localhost';
-
-SET DEFAULT ROLE 'ruolo_gestore'
-TO 'account_gestore'@'localhost';
-
 -- Registrazione e recupero del profilo di accesso: OP1 e OP13.
 GRANT EXECUTE ON PROCEDURE BachecaAnnunci.sp_RegistraUtente
 TO 'ruolo_accesso';
