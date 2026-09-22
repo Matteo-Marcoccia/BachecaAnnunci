@@ -1,0 +1,38 @@
+# Disposable local demo credentials, not a production deployment.
+services:
+  db:
+    build:
+      context: .
+      dockerfile: docker/mysql/Dockerfile
+    environment:
+      MYSQL_ROOT_PASSWORD: Bacheca_Demo_Root_2026!
+    command: ["--event-scheduler=ON"]
+    volumes:
+      - demo-data:/var/lib/mysql
+    healthcheck:
+      # TCP is unavailable during the image's temporary initialization server.
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysql --protocol=TCP -h 127.0.0.1 -u root -D BachecaAnnunci -Nse 'SELECT COUNT(*) FROM Categoria' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  app:
+    build: .
+    profiles: ["cli"]
+    stdin_open: true
+    tty: true
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: "jdbc:mysql://db:3306/BachecaAnnunci?useSSL=false&allowPublicKeyRetrieval=true&allowMultiQueries=false&serverTimezone=Europe/Rome"
+      DB_ACCESS_USER: account_accesso
+      DB_ACCESS_PASSWORD: Accesso_DB_2026!
+      DB_USER_USER: account_utente
+      DB_USER_PASSWORD: Utente_DB_2026!
+      DB_MANAGER_USER: account_gestore
+      DB_MANAGER_PASSWORD: Gestore_DB_2026!
+
+volumes:
+  demo-data:

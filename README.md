@@ -25,9 +25,49 @@ Java separates console views, controllers, services, DAO classes, models, and se
 | --- | --- |
 | `src/main/java` | Java CLI and JDBC integration |
 | `sql` | Schema, views, procedures, triggers, roles, and event |
+| `docker` | Docker-only database configuration and fictitious demo data |
 | `docs` | Requirements, E-R diagrams, relational design, and physical design |
 
-## 🛠️ Requirements
+## 🐳 Try it with Docker
+
+Install and start [Docker Desktop](https://docs.docker.com/desktop/) with Linux containers (or Docker Engine with the Compose plugin on Linux). Download this repository using **Code → Download ZIP** and extract it, or clone it. Open a terminal in the project directory, where `compose.yaml` is located.
+
+Java, Maven and MySQL are provided by the containers; you do not need to install them separately. The first build requires internet access and can take a few minutes.
+
+```shell
+docker compose run --build --rm app
+```
+
+This builds the images, starts MySQL, waits for initialization, and opens the interactive Italian CLI in your terminal. It is a terminal application, so there is no browser page to open.
+
+Select **2. Accesso** and use one of these fictitious accounts. The password for all three is **`Demo2026!`**:
+
+| Username | What to try |
+| --- | --- |
+| `utente_demo` | Browse Elettronica / Informatica, follow the sample listing, comment and send a message |
+| `venditore_demo` | Edit the sample listing, reply to messages and mark it as sold |
+| `gestore_demo` | Create categories and view reports |
+
+The demo starts with two categories and one listing. You can also register new users. Notifications appear only in the terminal.
+
+Run the same command to reopen the application. Database contents persist in a dedicated Docker volume. After exiting the menus, stop the database with:
+
+```shell
+docker compose down
+```
+
+To **delete all Docker demo data** and start again from the original sample data:
+
+```shell
+docker compose down --volumes
+docker compose run --build --rm app
+```
+
+Initialization scripts run only on an empty volume. Rebuilding an image does not update an existing database. This demo uses public example credentials and publishes no database port to the host; it does not use your locally installed MySQL database. Keep real personal data out of it.
+
+If startup fails, inspect `docker compose logs db`. Make sure Docker is running and using Linux containers. The manual installation below remains available if you prefer to configure everything yourself.
+
+## 🛠️ Manual installation requirements
 
 - JDK **17 or later**; Maven compiles for Java 17.
 - Apache Maven.
@@ -36,7 +76,7 @@ Java separates console views, controllers, services, DAO classes, models, and se
 
 MySQL is required: this project has no in-memory demo. Notifications are simulated; no email, SMS, or telephone service is contacted.
 
-## 🚀 Install and run
+## 🚀 Manual installation and launch
 
 ### 1. Initialize a fresh database
 
@@ -51,7 +91,7 @@ Open a MySQL administrator session and execute the following files in order:
 
 For example, start `mysql -u root -p` from the repository root, then run:
 
-```sql
+```text
 SOURCE sql/schema.sql;
 SOURCE sql/views.sql;
 SOURCE sql/triggers.sql;
@@ -119,7 +159,7 @@ Alternatively, import the Maven project into an IDE, select JDK 17 or later, con
 
 ### 4. Create the first manager and categories
 
-The application starts without predefined users or categories. All registrations create ordinary users.
+The manual installation starts without predefined users or categories (the Docker demo already includes them). All registrations create ordinary users.
 
 1. Select **Registrazione** and register a user named `gestore_demo`, choosing a password and using fictitious personal data. Supply at least one contact and a 16-character uppercase alphanumeric fiscal code.
 2. In a separate MySQL administrator session, promote that registered user:
