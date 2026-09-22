@@ -29,3 +29,10 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### Local IDE and environment configuration ###
+.idea/
+*.iml
+.env
+.env.*
+!.env.example

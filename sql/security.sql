@@ -88,3 +88,11 @@ TO 'ruolo_gestore';
 
 GRANT EXECUTE ON PROCEDURE BachecaAnnunci.sp_GeneraReportUtenti
 TO 'ruolo_gestore';
+-- Associazione dei ruoli agli account tecnici e attivazione a ogni connessione.
+GRANT 'ruolo_accesso' TO 'account_accesso'@'localhost';
+GRANT 'ruolo_utente' TO 'account_utente'@'localhost';
+GRANT 'ruolo_gestore' TO 'account_gestore'@'localhost';
+
+SET DEFAULT ROLE 'ruolo_accesso' TO 'account_accesso'@'localhost';
+SET DEFAULT ROLE 'ruolo_utente' TO 'account_utente'@'localhost';
+SET DEFAULT ROLE 'ruolo_gestore' TO 'account_gestore'@'localhost';
