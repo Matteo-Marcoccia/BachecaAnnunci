@@ -1,36 +1,153 @@
-# 📋 Bacheca elettronica di annunci
+# 🗄️ Bacheca elettronica di annunci
 
-Academic database project by **Matteo Marcoccia**, developed for the **Basi di Dati** course, academic year **2025–2026**.
+**Relational database design and implementation with MySQL.** Academic project by **Matteo Marcoccia** for the **Basi di Dati** course, academic year **2025–2026**.
 
-A Java command-line application for publishing second-hand listings, exchanging public comments and private messages, following listings, and reporting sales statistics. The interface and project report are in Italian.
+The project takes a classifieds platform from requirements and an E-R model to a relational schema, integrity rules, stored procedures, transactions and database roles. A Java command-line client exercises the database operations. The interface and the project report are in Italian.
 
-## 📌 Features
+**Start here:** inspect the diagram below, read the three SQL examples, or open the [full design report](docs/Bacheca%20Elettronica%20Di%20Annunci.pdf). No installation is needed to review the design.
 
-- Registration and login with salted PBKDF2-HMAC-SHA-256 password hashes.
-- Listings with title, description, price, category, and sale status.
-- Category browsing including subcategories through a recursive SQL query.
-- Listing updates and additional notes restricted to the author.
-- Public comments and private conversations between sellers and interested users.
-- Following and unfollowing listings, with simulated notifications printed to the console.
-- Manager tools for creating hierarchical categories and viewing each user's percentage of sold listings.
-- Sold listings disappear from search. Existing conversations can continue; new conversations and comments are blocked.
+## 🎯 Domain and requirements
 
-## 🏗️ Database and application design
+Users publish listings in hierarchical categories, add comments, exchange private messages and follow listings. Managers maintain categories and consult sales reports. The database must enforce rules such as:
 
-The implementation includes **7 tables, 3 views, 23 stored procedures, 14 triggers, and 1 scheduled event**. InnoDB transactions and row locks coordinate selected operations. The event removes private messages older than three years once a month.
+- A user must supply at least one contact and select an available preferred contact.
+- Only the author can modify or mark their active listing as sold.
+- Sold listings are excluded from search; new comments and new private conversations are rejected, while existing conversations may continue.
+- Category relationships must not form cycles, and category creation is reserved for managers.
 
-Java separates console views, controllers, services, DAO classes, models, and session management. DAOs call stored procedures through JDBC. MySQL roles restrict technical accounts to the procedures they need, without granting direct table access.
+## 🧩 Conceptual model
 
-| Directory | Contents |
+[![Conceptual E-R diagram: users, listings, categories, notes, comments, private messages and follows](docs/images/er-diagram.png)](docs/images/er-diagram.png)
+
+Original integrated E-R diagram from page 17 of the report. Click the image to view it at full size. This is the conceptual model; the following choices explain how it becomes the implemented database.
+
+## 🏗️ From the model to MySQL
+
+| Design choice | Implementation and purpose |
 | --- | --- |
-| `src/main/java` | Java CLI and JDBC integration |
-| `sql` | Schema, views, procedures, triggers, roles, and event |
-| `docker` | Docker-only database configuration and fictitious demo data |
-| `docs` | Requirements, E-R diagrams, relational design, and physical design |
+| Manager specialization | `Utente.IsGestore` represents the specialization without a separate manager table. |
+| Many-to-many follows | `Segui` uses `(UsernameUtente, CodiceAnnuncio)` as its composite primary key, preventing duplicate follows. |
+| Category hierarchy | `CategoriaPadre` is a self-referencing foreign key; `NULL` identifies a root category. Triggers check hierarchy constraints. |
+| One-to-many relationships | Foreign keys connect listings to authors and categories, and notes, comments and messages to listings. |
+| Normalization | Pages 30–32 of the report analyze functional dependencies and argue BCNF under the stated business rules. |
+| Workload-oriented indexes | `(Categoria, Stato)` supports filtering listings; `(Annuncio, Mittente, Destinatario)` supports conversation lookups; `DataOra` supports message cleanup. See [schema.sql](sql/schema.sql). |
 
-## 🐳 Try it with Docker
+The implementation contains **7 tables, 3 views, 23 stored procedures, 14 triggers and 1 scheduled event**. The value of these objects is in the behavior they enforce:
 
-Install and start [Docker Desktop](https://docs.docker.com/desktop/) with Linux containers (or Docker Engine with the Compose plugin on Linux). Download this repository using **Code → Download ZIP** and extract it, or clone it. Open a terminal in the project directory, where `compose.yaml` is located.
+| SQL file | Responsibility |
+| --- | --- |
+| [schema.sql](sql/schema.sql) | Tables, keys, relationships and indexes |
+| [views.sql](sql/views.sql) | Listing details, preferred contacts and aggregated user statistics |
+| [procedures.sql](sql/procedures.sql) | Supported operations, ownership checks and transaction boundaries |
+| [triggers.sql](sql/triggers.sql) | Contact validation, category rules and listing interaction constraints |
+| [security.sql](sql/security.sql) | Procedure-level privileges, role inheritance and technical accounts |
+| [events.sql](sql/events.sql) | Monthly removal of private messages older than three years |
+
+Index choices and workload volumes are design decisions, not measured performance results.
+
+## 🔎 Three SQL examples
+
+### 1. Search through a category hierarchy
+
+A search in a parent category must also find listings in its descendants. `sp_RicercaAnnunciPerCategoria` traverses the hierarchy with a recursive CTE and filters out sold listings and the requesting user's own listings.
+
+The query below is extracted from the procedure; its `p_` parameters are supplied by the caller:
+
+```sql
+WITH RECURSIVE SottoCategorie AS (
+    SELECT CodiceCategoria
+    FROM Categoria
+    WHERE CodiceCategoria = p_CodiceCategoria
+
+    UNION ALL
+
+    SELECT c.CodiceCategoria
+    FROM Categoria AS c
+    JOIN SottoCategorie AS sc
+      ON c.CategoriaPadre = sc.CodiceCategoria
+)
+SELECT
+    a.Codice,
+    a.Titolo,
+    a.Prezzo,
+    a.Stato,
+    a.Autore,
+    a.Categoria,
+    c.Nome AS NomeCategoria
+FROM Annuncio AS a
+JOIN SottoCategorie AS sc
+  ON sc.CodiceCategoria = a.Categoria
+JOIN Categoria AS c
+  ON c.CodiceCategoria = a.Categoria
+WHERE a.Stato = 'InVendita'
+  AND a.Autore <> p_UsernameRichiedente
+ORDER BY a.Titolo;
+```
+
+With the Docker sample data, searching **Elettronica** as `utente_demo` finds the keyboard listed under **Informatica**. The seller accesses their own listing through the dedicated operation for their listings.
+
+### 2. Mark a listing as sold within a transaction
+
+`sp_ContrassegnaAnnuncioVenduto` checks the supplied author and current state while locking the selected row:
+
+```sql
+-- Excerpt inside sp_ContrassegnaAnnuncioVenduto.
+SELECT Codice
+INTO var_CodiceAnnuncio
+FROM Annuncio
+WHERE Codice = p_CodiceAnnuncio
+  AND Autore = p_UsernameAutore
+  AND Stato = 'InVendita'
+FOR UPDATE;
+```
+
+The full procedure starts a `READ COMMITTED` transaction, rejects a missing match with `SIGNAL`, updates the state and commits. An exception handler rolls back and rethrows SQL errors. The row lock coordinates concurrent operations that lock the same listing, such as modifications and follows. After commit, the procedure returns the followers to notify; the Java client prints simulated notifications.
+
+The sold-listing rules are also visible in [triggers.sql](sql/triggers.sql): new comments are rejected, and private messages may continue only in an existing conversation. These are separate checks from the sale transaction.
+
+### 3. Grant operations instead of direct table access
+
+The technical accounts receive procedure execution privileges through three roles. The manager role inherits ordinary user operations and adds category management and reporting.
+
+```sql
+-- Excerpts from sql/security.sql.
+GRANT EXECUTE ON PROCEDURE BachecaAnnunci.sp_PubblicaAnnuncio
+TO 'ruolo_utente';
+
+GRANT 'ruolo_utente' TO 'ruolo_gestore';
+
+GRANT EXECUTE ON PROCEDURE BachecaAnnunci.sp_GeneraReportUtenti
+TO 'ruolo_gestore';
+
+GRANT 'ruolo_gestore' TO 'account_gestore'@'localhost';
+SET DEFAULT ROLE 'ruolo_gestore' TO 'account_gestore'@'localhost';
+```
+
+The accounts have no direct table privileges. Procedures use `SQL SECURITY DEFINER` to perform the permitted operations. This separates the database privileges of access, ordinary-user and manager accounts; the end-user authentication boundary is described below.
+
+## 🔐 Scope of the security model
+
+This is an academic local-client application. Java authenticates the application user and passes that username to SQL procedures; the database checks the role and the supplied ownership information. The shared technical database credentials are available to the client, so these checks do not independently authenticate each end user against a modified client or direct SQL access. A production deployment would require a different trust boundary, such as a server handling authentication and retaining database credentials.
+
+## 📄 Design documentation
+
+The [full report](docs/Bacheca%20Elettronica%20Di%20Annunci.pdf) covers requirements, business rules, conceptual modeling, workload estimates, logical restructuring, normalization and physical implementation.
+
+Useful entry points: **page 17** for the integrated E-R model, **page 29** for relational translation, **pages 30–32** for normalization, and **page 33 onward** for physical design and privileges.
+
+## 🧪 Explore the implementation
+
+You can review all SQL files directly on GitHub. To exercise the operations interactively, the Java/JDBC client provides registration, login, listing management, comments, messages and reports. It uses salted PBKDF2 password hashes and displays simulated notifications; it does not contact external messaging services.
+
+- [Manual database and client setup](docs/setup.md): script order, environment variables, build and first manager.
+- Docker demo: automatic database initialization with fictitious users, categories and a listing. Instructions are below.
+
+<details>
+<summary>🐳 Open Docker demo instructions</summary>
+
+### Docker demo (optional)
+
+Install and start [Docker Desktop](https://docs.docker.com/desktop/) with Linux containers (Windows requires WSL 2; or Docker Engine with the Compose plugin on Linux). Download this repository using **Code → Download ZIP** and extract it, or clone it. Open a terminal in the project directory, where `compose.yaml` is located.
 
 Java, Maven and MySQL are provided by the containers; you do not need to install them separately. The first build requires internet access and can take a few minutes.
 
@@ -65,134 +182,24 @@ docker compose run --build --rm app
 
 Initialization scripts run only on an empty volume. Rebuilding an image does not update an existing database. This demo uses public example credentials and publishes no database port to the host; it does not use your locally installed MySQL database. Keep real personal data out of it.
 
-If startup fails, inspect `docker compose logs db`. Make sure Docker is running and using Linux containers. The manual installation below remains available if you prefer to configure everything yourself.
+If startup fails, inspect `docker compose logs db`. Make sure Docker is running and using Linux containers. See the [manual setup guide](docs/setup.md) if you prefer to configure everything yourself.
 
-## 🛠️ Manual installation requirements
+</details>
 
-- JDK **17 or later**; Maven compiles for Java 17.
-- Apache Maven.
-- MySQL Server **8.0+** and a SQL client such as MySQL Workbench or the `mysql` command-line client.
-- A local MySQL administrator account for initial setup.
+### Suggested verification path
 
-MySQL is required: this project has no in-memory demo. Notifications are simulated; no email, SMS, or telephone service is contacted.
+1. As `utente_demo`, search the parent category and find the sample listing in its subcategory; follow it, comment and message the seller.
+2. As `venditore_demo`, open your listings, add a note and mark the listing as sold.
+3. As `utente_demo`, verify that search excludes it and the existing conversation remains available.
+4. As `gestore_demo`, inspect the report: the seller's single sold listing should yield a 100% sale rate.
 
-## 🚀 Manual installation and launch
+For a manual installation, create equivalent users and data first. The repository has no automated test suite; `mvn verify` checks compilation and packaging, not database behavior. The Docker container startup still needs end-to-end verification.
 
-### 1. Initialize a fresh database
+## 📂 Repository guide
 
-Open a MySQL administrator session and execute the following files in order:
-
-1. `sql/schema.sql`
-2. `sql/views.sql`
-3. `sql/triggers.sql`
-4. `sql/procedures.sql`
-5. `sql/security.sql`
-6. `sql/events.sql` (optional for trying the application; required for scheduled message cleanup)
-
-For example, start `mysql -u root -p` from the repository root, then run:
-
-```text
-SOURCE sql/schema.sql;
-SOURCE sql/views.sql;
-SOURCE sql/triggers.sql;
-SOURCE sql/procedures.sql;
-SOURCE sql/security.sql;
--- Optional cleanup scheduler:
-SOURCE sql/events.sql;
-```
-
-The schema creates `BachecaAnnunci` and is intended for a fresh installation; it is not a migration script. Do not rerun it over an existing installation. The event script enables the server-wide event scheduler and requires administrative privileges; ensure scheduling is also enabled after server restarts if you need continuous cleanup.
-
-`security.sql` creates three local technical accounts, grants their roles, and sets those roles as defaults. The password literals in that file are **local setup examples**: choose your own passwords before executing it and keep personal credentials out of commits. `CREATE USER IF NOT EXISTS` does not change passwords of existing accounts.
-
-### 2. Configure the environment
-
-The application reads these environment variables:
-
-| Variable | Value |
+| Path | Contents |
 | --- | --- |
-| `DB_URL` | Optional JDBC URL; defaults to `jdbc:mysql://localhost:3306/BachecaAnnunci?useSSL=false&allowPublicKeyRetrieval=true&allowMultiQueries=false&serverTimezone=Europe/Rome` |
-| `DB_ACCESS_USER` | `account_accesso` |
-| `DB_ACCESS_PASSWORD` | Password assigned to the access account |
-| `DB_USER_USER` | `account_utente` |
-| `DB_USER_PASSWORD` | Password assigned to the ordinary user account |
-| `DB_MANAGER_USER` | `account_gestore` |
-| `DB_MANAGER_PASSWORD` | Password assigned to the manager account |
-
-These are database accounts, separate from the usernames registered inside the application. Keep the three technical account names as shown: the profile-verification procedure checks those names.
-
-In PowerShell, configure the current terminal session before launching:
-
-```powershell
-$env:DB_ACCESS_USER = 'account_accesso'
-$env:DB_ACCESS_PASSWORD = '<your access account password>'
-$env:DB_USER_USER = 'account_utente'
-$env:DB_USER_PASSWORD = '<your ordinary account password>'
-$env:DB_MANAGER_USER = 'account_gestore'
-$env:DB_MANAGER_PASSWORD = '<your manager account password>'
-```
-
-Replace the password placeholders with the values configured in MySQL. If using an IDE, configure these variables in its run configuration instead. The app does not load `.env` files automatically.
-
-### 3. Build and start
-
-From the repository root:
-
-```shell
-mvn verify
-mvn org.apache.maven.plugins:maven-dependency-plugin:3.7.0:copy-dependencies -DincludeScope=runtime
-```
-
-Run on Windows:
-
-```powershell
-java -cp "target/classes;target/dependency/*" app.Main
-```
-
-Run on Linux or macOS:
-
-```bash
-java -cp 'target/classes:target/dependency/*' app.Main
-```
-
-Alternatively, import the Maven project into an IDE, select JDK 17 or later, configure the environment variables above, and run `app.Main`.
-
-### 4. Create the first manager and categories
-
-The manual installation starts without predefined users or categories (the Docker demo already includes them). All registrations create ordinary users.
-
-1. Select **Registrazione** and register a user named `gestore_demo`, choosing a password and using fictitious personal data. Supply at least one contact and a 16-character uppercase alphanumeric fiscal code.
-2. In a separate MySQL administrator session, promote that registered user:
-
-```sql
-UPDATE BachecaAnnunci.Utente
-SET IsGestore = TRUE
-WHERE Username = 'gestore_demo';
-```
-
-3. Log in again as `gestore_demo` to load the new role.
-4. Create a category from the manager menu. Users can now publish listings in it.
-
-The promotion is a one-time administrator setup action; ordinary application accounts cannot promote themselves.
-
-## 🧪 Verification walkthrough
-
-The repository currently has no automated test suite. `mvn verify` checks compilation and packaging; it does not validate a running MySQL installation.
-
-To exercise the main flows on a disposable database:
-
-1. Register a manager and two ordinary users with different usernames and fiscal codes.
-2. Create a parent category and a subcategory as the manager.
-3. Publish a listing as the first ordinary user.
-4. As the second user, find it through the parent category, follow it, add a comment, and send a private message.
-5. As the author, reply, add a note, and modify the listing; verify the simulated notifications.
-6. Mark the listing as sold. Check that search excludes it, new comments are rejected, and the existing conversation remains usable.
-7. Open the manager report and check that a user with one published and sold listing has a 100% sale rate. An ordinary user should not have manager operations.
-
-## 🔐 Scope of the security model
-
-This is an academic local-client application. Java authenticates the application user and passes that username to SQL procedures; the database checks the role and the supplied ownership information. The shared technical database credentials are available to the client, so these checks do not independently authenticate each end user against a modified client or direct SQL access. A production deployment would require a different trust boundary, such as a server handling authentication and retaining database credentials.
-
-## 📄 Documentation
-
-See the [project report](docs/Bacheca%20Elettronica%20Di%20Annunci.pdf) for the requirements, conceptual E-R model, relational schema, workload estimates, normalization, indexes, and SQL design. Workload volumes in the report are design assumptions, not measured benchmark results.
+| `sql/` | Main database implementation |
+| `docs/` | Academic report, E-R diagram and manual setup guide |
+| `src/main/java/` | Demonstration CLI, controllers, services and JDBC DAOs |
+| `docker/`, `compose.yaml`, `Dockerfile` | Optional local demo environment and fictitious data |
